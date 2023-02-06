@@ -2,14 +2,13 @@ name: release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches: [release]
   workflow_dispatch:
     inputs:
       logLevel:
-        description: 'Log level'     
+        description: "Log level"
         required: true
-        default: 'warning'
+        default: "warning"
 jobs:
   bina-for-curl-download:
     name: Make bina.json
@@ -115,7 +114,14 @@ jobs:
           path: ./cli/bin/**/*.tar.gz
   publish:
     name: Publish binaries
-    needs: [bina-for-curl-download, build-linux-amd64, build-linux-arm64, build-darwin-amd64, build-windows-amd64]
+    needs:
+      [
+        bina-for-curl-download,
+        build-linux-amd64,
+        build-linux-arm64,
+        build-darwin-amd64,
+        build-windows-amd64,
+      ]
     env:
       ARTIFACT_DIR: ./release
     runs-on: ubuntu-latest
