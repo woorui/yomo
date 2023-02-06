@@ -38,7 +38,7 @@ jobs:
       - name: Run go mod tidy
         run: go mod tidy
       - name: build & archive binaries
-        run: cd ./cli && GOARCH=amd64 GOOS=darwin go build -o bin/yomo -ldflags "-s -w test" ../cmd/yomo/main.go
+        run: cd ./cli && GOARCH=amd64 GOOS=darwin go build -o bin/yomo ../cmd/yomo/main.go
       - name: yomo bin
         run: ./bin/yomo
       - name: upload artifacts
