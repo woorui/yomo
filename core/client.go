@@ -32,6 +32,8 @@ type Client struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
+	controlStreamOpener ClientControlStreamOpener
+
 	writeFrameChan chan frame.Frame
 }
 
@@ -52,16 +54,22 @@ func NewClient(appName string, connType ClientType, opts ...ClientOption) *Clien
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
+	clientControlStreamOpener := NewClientControlStreamOpener(
+		ctx,
+		option.tlsConfig, option.quicConfig,
+		metadata.DefaultDecoder(), y3codec.Codec(), y3codec.PacketReader(), logger)
+
 	return &Client{
-		name:           appName,
-		clientID:       clientID,
-		streamType:     connType,
-		opts:           option,
-		logger:         logger,
-		errorfn:        func(err error) { logger.Error("client err", err) },
-		writeFrameChan: make(chan frame.Frame),
-		ctx:            ctx,
-		ctxCancel:      ctxCancel,
+		name:                appName,
+		clientID:            clientID,
+		streamType:          connType,
+		opts:                option,
+		logger:              logger,
+		errorfn:             func(err error) { logger.Error("client err", err) },
+		controlStreamOpener: clientControlStreamOpener,
+		writeFrameChan:      make(chan frame.Frame),
+		ctx:                 ctx,
+		ctxCancel:           ctxCancel,
 	}
 }
 
@@ -91,7 +99,7 @@ connect:
 	return nil
 }
 
-func (c *Client) runBackground(ctx context.Context, addr string, controlStream *ClientControlStream, dataStream DataStream) {
+func (c *Client) runBackground(ctx context.Context, addr string, controlStream ClientControlStream, dataStream DataStream) {
 	reconnection := make(chan struct{})
 
 	go c.processStream(controlStream, dataStream, reconnection)
@@ -148,7 +156,7 @@ func (c *Client) nonBlockWriteFrame(f frame.Frame) error {
 	}
 }
 
-func (c *Client) cleanStream(controlStream *ClientControlStream, err error) {
+func (c *Client) cleanStream(controlStream ClientControlStream, err error) {
 	errString := ""
 	if err != nil {
 		errString = err.Error()
@@ -171,14 +179,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) openControlStream(ctx context.Context, addr string) (*ClientControlStream, error) {
-	controlStream, err := OpenClientControlStream(
-		ctx, addr,
-		c.opts.tlsConfig, c.opts.quicConfig,
-		metadata.DefaultDecoder(),
-		y3codec.Codec(), y3codec.PacketReader(),
-		c.logger,
-	)
+func (c *Client) openControlStream(ctx context.Context, addr string) (ClientControlStream, error) {
+	controlStream, err := c.controlStreamOpener.Open(ctx, addr)
 	if err != nil {
 		return controlStream, err
 	}
@@ -190,7 +192,7 @@ func (c *Client) openControlStream(ctx context.Context, addr string) (*ClientCon
 	return controlStream, nil
 }
 
-func (c *Client) openStream(ctx context.Context, addr string) (*ClientControlStream, DataStream, error) {
+func (c *Client) openStream(ctx context.Context, addr string) (ClientControlStream, DataStream, error) {
 	controlStream, err := c.openControlStream(ctx, addr)
 	if err != nil {
 		return controlStream, nil, err
@@ -203,7 +205,7 @@ func (c *Client) openStream(ctx context.Context, addr string) (*ClientControlStr
 	return controlStream, dataStream, nil
 }
 
-func (c *Client) openDataStream(ctx context.Context, controlStream *ClientControlStream) (DataStream, error) {
+func (c *Client) openDataStream(ctx context.Context, controlStream ClientControlStream) (DataStream, error) {
 	handshakeFrame := &frame.HandshakeFrame{
 		Name:            c.name,
 		ID:              c.clientID,
@@ -219,7 +221,7 @@ func (c *Client) openDataStream(ctx context.Context, controlStream *ClientContro
 	return controlStream.AcceptStream(ctx)
 }
 
-func (c *Client) processStream(controlStream *ClientControlStream, dataStream DataStream, reconnection chan<- struct{}) {
+func (c *Client) processStream(controlStream ClientControlStream, dataStream DataStream, reconnection chan<- struct{}) {
 	defer dataStream.Close()
 
 	readFrameChan := c.readFrame(dataStream)
