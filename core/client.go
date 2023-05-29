@@ -38,7 +38,7 @@ type Client struct {
 }
 
 // NewClient creates a new YoMo-Client.
-func NewClient(appName string, connType ClientType, opts ...ClientOption) *Client {
+func NewClient(appName string, streamType StreamType, opts ...ClientOption) *Client {
 	option := defaultClientOption()
 
 	for _, o := range opts {
@@ -46,7 +46,7 @@ func NewClient(appName string, connType ClientType, opts ...ClientOption) *Clien
 	}
 	clientID := id.New()
 
-	logger := option.logger.With("component", connType.String(), "client_id", clientID, "client_name", appName)
+	logger := option.logger.With("component", streamType.String(), "client_id", clientID, "client_name", appName)
 
 	if option.credential != nil {
 		logger.Info("use credential", "credential_name", option.credential.Name())
@@ -62,7 +62,7 @@ func NewClient(appName string, connType ClientType, opts ...ClientOption) *Clien
 	return &Client{
 		name:                appName,
 		clientID:            clientID,
-		streamType:          connType,
+		streamType:          streamType,
 		opts:                option,
 		logger:              logger,
 		errorfn:             func(err error) { logger.Error("client err", err) },

@@ -3,24 +3,27 @@ package core
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/yomorun/yomo/core/auth"
 	"github.com/yomorun/yomo/core/frame"
 	"github.com/yomorun/yomo/core/metadata"
 	"github.com/yomorun/yomo/core/router"
-	"github.com/yomorun/yomo/core/ylog"
 	"github.com/yomorun/yomo/pkg/config"
 	"github.com/yomorun/yomo/pkg/frame-codec/y3codec"
+	"golang.org/x/exp/slog"
 )
 
 const testaddr = "127.0.0.1:19999"
 
-var discardingLogger = ylog.NewFromConfig(ylog.Config{Output: "/dev/null", ErrorOutput: "/dev/null"})
+var discardingLogger = slog.New(slog.NewTextHandler(io.Discard))
 
 // debugLogger be used to debug unittest.
 // var debugLogger = ylog.NewFromConfig(ylog.Config{Verbose: true, Level: "debug"})
@@ -76,6 +79,7 @@ func TestFrameRoundTrip(t *testing.T) {
 		WithClientQuicConfig(DefalutQuicConfig),
 		WithClientTLSConfig(nil),
 		WithLogger(discardingLogger),
+		WithObserveDataTags(obversedTag),
 	)
 
 	source.SetBackflowFrameObserver(func(bf *frame.BackflowFrame) {
@@ -154,6 +158,28 @@ func TestFrameRoundTrip(t *testing.T) {
 	assert.NoError(t, source.Close(), "source client.Close() should not return error")
 	assert.NoError(t, sfn.Close(), "sfn client.Close() should not return error")
 	assert.NoError(t, server.Close(), "server.Close() should not return error")
+}
+
+func TestClientReconnect(t *testing.T) {
+	// opener will be seccessful after be called 3 times.
+	opener := &mockOpener{retryMax: 3, retryMaxError: nil}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &Client{
+		opts: &clientOptions{
+			connectUntilSucceed: true, // The main test case.
+			logger:              discardingLogger,
+		},
+		errorfn:             func(err error) { discardingLogger.Error("client handle error", err) },
+		ctx:                 ctx,
+		ctxCancel:           cancel,
+		logger:              discardingLogger,
+		controlStreamOpener: opener,
+		writeFrameChan:      make(chan frame.Frame),
+	}
+
+	err := client.Connect(context.TODO(), "mock-addr")
+	assert.NoError(t, err)
 }
 
 func checkClientExited(client *Client, tim time.Duration) bool {
@@ -248,3 +274,58 @@ func (w *frameWriterRecorder) frameBytes() []byte {
 	bytes := w.buf.Bytes()
 	return bytes
 }
+
+type mockOpener struct {
+	retryMax      int32
+	num           atomic.Int32
+	retryMaxError error
+
+	// this params will be used for control stream retry.
+	controlStreamRetryMax      int32
+	controlStreamRetryMaxError error
+}
+
+func (r *mockOpener) Open(ctx context.Context, addr string) (ClientControlStream, error) {
+	if n := r.num.Load(); n < r.retryMax {
+		r.num.Add(1)
+		return nil, net.ErrClosed
+	}
+
+	cs := &mockControlStream{
+		retryMax:      r.controlStreamRetryMax,
+		retryMaxError: r.controlStreamRetryMaxError,
+	}
+
+	return cs, nil
+}
+
+type mockControlStream struct {
+	retryMax      int32
+	num           atomic.Int32
+	retryMaxError error
+}
+
+func (cs *mockControlStream) AcceptStream(context.Context) (DataStream, error) {
+	stream := newDataStream(
+		"mock-stream-for-test-retrying",
+		"0123",
+		StreamTypeSource,
+		nil,
+		nil,
+		NewFrameStream(newMemByteStream(nil), y3codec.Codec(), y3codec.PacketReader()),
+	)
+	return stream, nil
+}
+
+func (cs *mockControlStream) Authenticate(*auth.Credential) error {
+	if n := cs.num.Load(); n < cs.retryMax {
+		cs.num.Add(1)
+		return ErrAuthenticateFailed{"mock-error"}
+	}
+
+	return nil
+}
+func (cs *mockControlStream) CloseWithError(string) error               { return nil }
+func (cs *mockControlStream) RequestStream(*frame.HandshakeFrame) error { return nil }
+
+var _ ClientControlStream = &mockControlStream{}

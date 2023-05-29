@@ -32,7 +32,7 @@ func NewStreamFunction(name, zipperAddr string, opts ...SfnOption) StreamFunctio
 	for k, v := range opts {
 		clientOpts[k] = core.ClientOption(v)
 	}
-	client := core.NewClient(name, core.ClientTypeStreamFunction, clientOpts...)
+	client := core.NewClient(name, core.StreamTypeStreamFunction, clientOpts...)
 	sfn := &streamFunction{
 		name:            name,
 		zipperAddr:      zipperAddr,
