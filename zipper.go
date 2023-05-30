@@ -72,7 +72,7 @@ func NewZipper(name string, functions []config.Function, meshConfig map[string]c
 			core.WithNonBlockWrite(),
 			core.WithConnectUntilSucceed(),
 		)
-		downstream := core.NewClient(name, core.ClientTypeUpstreamZipper, clientOptions...)
+		downstream := core.NewClient(name, core.StreamTypeUpstreamZipper, clientOptions...)
 
 		server.Logger().Debug("add downstream", "downstream_addr", addr, "downstream_name", downstream.Name())
 		server.AddDownstreamServer(addr, downstream)

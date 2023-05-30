@@ -34,24 +34,23 @@ type ConnectionHandler func(conn quic.Connection)
 
 // Server is the underlying server of Zipper
 type Server struct {
-	ctx                     context.Context
-	ctxCancel               context.CancelFunc
-	name                    string
-	connector               *Connector
-	router                  router.Router
-	metadataDecoder         metadata.Decoder
-	codec                   frame.Codec
-	packetReadWriter        frame.PacketReadWriter
-	counterOfDataFrame      int64
-	downstreams             map[string]FrameWriterConnection
-	mu                      sync.Mutex
-	opts                    *serverOptions
-	startHandlers           []FrameHandler
-	beforeHandlers          []FrameHandler
-	afterHandlers           []FrameHandler
-	connectionCloseHandlers []ConnectionHandler
-	listener                Listener
-	logger                  *slog.Logger
+	ctx                context.Context
+	ctxCancel          context.CancelFunc
+	name               string
+	connector          *Connector
+	router             router.Router
+	metadataDecoder    metadata.Decoder
+	codec              frame.Codec
+	packetReadWriter   frame.PacketReadWriter
+	counterOfDataFrame int64
+	downstreams        map[string]FrameWriterConnection
+	mu                 sync.Mutex
+	opts               *serverOptions
+	startHandlers      []FrameHandler
+	beforeHandlers     []FrameHandler
+	afterHandlers      []FrameHandler
+	listener           Listener
+	logger             *slog.Logger
 }
 
 // NewServer create a Server instance.
@@ -505,11 +504,6 @@ func (s *Server) SetBeforeHandlers(handlers ...FrameHandler) {
 // SetAfterHandlers set the after handlers of server.
 func (s *Server) SetAfterHandlers(handlers ...FrameHandler) {
 	s.afterHandlers = append(s.afterHandlers, handlers...)
-}
-
-// SetConnectionCloseHandlers set the connection close handlers of server.
-func (s *Server) SetConnectionCloseHandlers(handlers ...ConnectionHandler) {
-	s.connectionCloseHandlers = append(s.connectionCloseHandlers, handlers...)
 }
 
 func (s *Server) authNames() []string {

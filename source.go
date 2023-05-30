@@ -41,7 +41,7 @@ func NewSource(name, zipperAddr string, opts ...SourceOption) Source {
 		clientOpts[k] = core.ClientOption(v)
 	}
 
-	client := core.NewClient(name, core.ClientTypeSource, clientOpts...)
+	client := core.NewClient(name, core.StreamTypeSource, clientOpts...)
 
 	return &yomoSource{
 		name:       name,

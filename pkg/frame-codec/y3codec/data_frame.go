@@ -9,12 +9,16 @@ import (
 func encodeDataFrame(f *frame.DataFrame) ([]byte, error) {
 	data := y3.NewNodePacketEncoder(byte(f.Type()))
 	// MetaFrame
-	mb, _ := encodeMetaFrame(f.Meta)
-	data.AddBytes(mb)
+	if f.Meta != nil {
+		mb, _ := encodeMetaFrame(f.Meta)
+		data.AddBytes(mb)
+	}
 
 	// PayloadFrame
-	pd, _ := encodePayloadFrame(f.Payload)
-	data.AddBytes(pd)
+	if f.Payload != nil {
+		pd, _ := encodePayloadFrame(f.Payload)
+		data.AddBytes(pd)
+	}
 
 	return data.Encode(), nil
 }
