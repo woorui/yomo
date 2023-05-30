@@ -35,7 +35,7 @@ type Client struct {
 	controlStreamOpener ClientControlStreamOpener
 
 	writeFrameChan chan frame.Frame
-	reconnecChan   chan struct{}
+	reconnectChan  chan struct{}
 }
 
 // NewClient creates a new YoMo-Client.
@@ -69,7 +69,7 @@ func NewClient(appName string, streamType StreamType, opts ...ClientOption) *Cli
 		errorfn:             func(err error) { logger.Error("client err", err) },
 		controlStreamOpener: clientControlStreamOpener,
 		writeFrameChan:      make(chan frame.Frame),
-		reconnecChan:        make(chan struct{}),
+		reconnectChan:       make(chan struct{}),
 		ctx:                 ctx,
 		ctxCancel:           ctxCancel,
 	}
@@ -112,7 +112,7 @@ func (c *Client) runBackground(ctx context.Context, addr string, controlStream C
 		case <-ctx.Done():
 			c.cleanStream(controlStream, ctx.Err())
 			return
-		case <-c.reconnecChan:
+		case <-c.reconnectChan:
 		reconnect:
 			var err error
 			controlStream, dataStream, err = c.openStream(ctx, addr)
@@ -273,7 +273,7 @@ func (c *Client) handleFrameError(err error) {
 	// always attempting to reconnect if an error is encountered,
 	// the error is mostly network error.
 	select {
-	case c.reconnecChan <- struct{}{}:
+	case c.reconnectChan <- struct{}{}:
 	default:
 	}
 }
