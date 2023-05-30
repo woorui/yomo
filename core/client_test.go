@@ -339,7 +339,7 @@ func (cs *mockControlStream) AcceptStream(context.Context) (DataStream, error) {
 		StreamTypeSource,
 		nil,
 		nil,
-		NewFrameStream(newMemByteStream(nil), y3codec.Codec(), y3codec.PacketReader()),
+		NewFrameStream(newMemByteStream(nil), y3codec.Codec(), y3codec.PacketReadWriter()),
 	)
 	return stream, nil
 }
