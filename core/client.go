@@ -58,7 +58,7 @@ func NewClient(appName string, streamType StreamType, opts ...ClientOption) *Cli
 	clientControlStreamOpener := NewClientControlStreamOpener(
 		ctx,
 		option.tlsConfig, option.quicConfig,
-		metadata.DefaultDecoder(), y3codec.Codec(), y3codec.PacketReader(), logger)
+		metadata.DefaultDecoder(), y3codec.Codec(), y3codec.PacketReadWriter(), logger)
 
 	return &Client{
 		name:                appName,

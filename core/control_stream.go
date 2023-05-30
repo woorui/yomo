@@ -51,14 +51,14 @@ type ServerControlStream struct {
 	stream             frame.ReadWriteCloser
 	handshakeFrameChan chan *frame.HandshakeFrame
 	codec              frame.Codec
-	packetReader       frame.PacketReader
+	packetReader       frame.PacketReadWriter
 	logger             *slog.Logger
 }
 
 // NewServerControlStream returns ServerControlStream from quic Connection and the first stream of this Connection.
 func NewServerControlStream(
 	conn Connection, stream ContextReadWriteCloser,
-	codec frame.Codec, packetReader frame.PacketReader,
+	codec frame.Codec, packetReader frame.PacketReadWriter,
 	logger *slog.Logger,
 ) *ServerControlStream {
 	if logger == nil {
@@ -184,7 +184,7 @@ type clientControlStream struct {
 
 	// encode and decode the frame
 	codec        frame.Codec
-	packetReader frame.PacketReader
+	packetReader frame.PacketReadWriter
 
 	// mu protect handshakeFrames
 	mu              sync.Mutex
@@ -202,8 +202,8 @@ type clientControlStreamOpener struct {
 	metadataDecoder metadata.Decoder
 
 	// encode and decode the frame
-	codec        frame.Codec
-	packetReader frame.PacketReader
+	codec            frame.Codec
+	packetReadWriter frame.PacketReadWriter
 
 	logger *slog.Logger
 }
@@ -239,16 +239,16 @@ func NewClientControlStreamOpener(
 	ctx context.Context,
 	tlsConfig *tls.Config, quicConfig *quic.Config,
 	metadataDecoder metadata.Decoder,
-	codec frame.Codec, packetReader frame.PacketReader,
+	codec frame.Codec, packetReadWriter frame.PacketReadWriter,
 	logger *slog.Logger,
 ) ClientControlStreamOpener {
 	opener := &clientControlStreamOpener{
-		tlsConfig:       tlsConfig,
-		quicConfig:      quicConfig,
-		metadataDecoder: metadataDecoder,
-		codec:           codec,
-		packetReader:    packetReader,
-		logger:          logger,
+		tlsConfig:        tlsConfig,
+		quicConfig:       quicConfig,
+		metadataDecoder:  metadataDecoder,
+		codec:            codec,
+		packetReadWriter: packetReadWriter,
+		logger:           logger,
 	}
 
 	return opener
@@ -268,11 +268,11 @@ func (o *clientControlStreamOpener) Open(ctx context.Context, addr string) (Clie
 		ctx: ctx,
 
 		conn:   &QuicConnection{conn},
-		stream: NewFrameStream(stream0, o.codec, o.packetReader),
+		stream: NewFrameStream(stream0, o.codec, o.packetReadWriter),
 
 		metadataDecoder: o.metadataDecoder,
 		codec:           o.codec,
-		packetReader:    o.packetReader,
+		packetReader:    o.packetReadWriter,
 		logger:          o.logger,
 
 		handshakeFrames:            make(map[string]*frame.HandshakeFrame),
@@ -362,6 +362,10 @@ func (cs *clientControlStream) RequestStream(hf *frame.HandshakeFrame) error {
 
 func (cs *clientControlStream) AcceptStream(ctx context.Context) (DataStream, error) {
 	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-cs.ctx.Done():
+		return nil, cs.ctx.Err()
 	case reject := <-cs.handshakeRejectedFrameChan:
 		cs.mu.Lock()
 		delete(cs.handshakeFrames, reject.ID)
