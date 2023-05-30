@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -161,24 +162,54 @@ func TestFrameRoundTrip(t *testing.T) {
 }
 
 func TestClientReconnect(t *testing.T) {
-	// opener will be seccessful after be called 3 times.
-	opener := &mockOpener{retryMax: 3, retryMaxError: nil}
+	createRetryClient := func(retryMax int32, retryMaxError, authError error, connectUntilSucceed, nonBlockWrite bool) *Client {
+		ctx, cancel := context.WithCancel(context.Background())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	client := &Client{
-		opts: &clientOptions{
-			connectUntilSucceed: true, // The main test case.
+		opener := &mockOpener{
+			retryMax:      retryMax,
+			retryMaxError: retryMaxError,
+			authError:     authError,
+		}
+
+		opts := &clientOptions{
+			connectUntilSucceed: connectUntilSucceed,
+			nonBlockWrite:       nonBlockWrite,
 			logger:              discardingLogger,
-		},
-		errorfn:             func(err error) { discardingLogger.Error("client handle error", err) },
-		ctx:                 ctx,
-		ctxCancel:           cancel,
-		logger:              discardingLogger,
-		controlStreamOpener: opener,
-		writeFrameChan:      make(chan frame.Frame),
+		}
+
+		client := &Client{
+			opts:                opts,
+			errorfn:             func(err error) { opts.logger.Error("client handle error", err) },
+			ctx:                 ctx,
+			ctxCancel:           cancel,
+			logger:              discardingLogger,
+			controlStreamOpener: opener,
+			writeFrameChan:      make(chan frame.Frame),
+		}
+
+		return client
 	}
 
+	client := createRetryClient(3, nil, ErrAuthenticateFailed{"mock-auth-error"}, true, false)
+
 	err := client.Connect(context.TODO(), "mock-addr")
+	assert.NoError(t, err)
+
+	writeErrChan := make(chan error)
+	go func() {
+		dataFrame := &frame.DataFrame{
+			Payload: &frame.PayloadFrame{Carriage: []byte("hello")},
+		}
+		writeErrChan <- client.WriteFrame(dataFrame)
+	}()
+
+	var ErrWriteFrameTimeout = errors.New("write frame timeout")
+
+	select {
+	case err = <-writeErrChan:
+	case <-time.After(time.Second):
+		err = ErrWriteFrameTimeout
+	}
 	assert.NoError(t, err)
 }
 
@@ -281,8 +312,7 @@ type mockOpener struct {
 	retryMaxError error
 
 	// this params will be used for control stream retry.
-	controlStreamRetryMax      int32
-	controlStreamRetryMaxError error
+	authError error
 }
 
 func (r *mockOpener) Open(ctx context.Context, addr string) (ClientControlStream, error) {
@@ -292,17 +322,14 @@ func (r *mockOpener) Open(ctx context.Context, addr string) (ClientControlStream
 	}
 
 	cs := &mockControlStream{
-		retryMax:      r.controlStreamRetryMax,
-		retryMaxError: r.controlStreamRetryMaxError,
+		authError: r.authError,
 	}
 
 	return cs, nil
 }
 
 type mockControlStream struct {
-	retryMax      int32
-	num           atomic.Int32
-	retryMaxError error
+	authError error
 }
 
 func (cs *mockControlStream) AcceptStream(context.Context) (DataStream, error) {
@@ -317,15 +344,6 @@ func (cs *mockControlStream) AcceptStream(context.Context) (DataStream, error) {
 	return stream, nil
 }
 
-func (cs *mockControlStream) Authenticate(*auth.Credential) error {
-	if n := cs.num.Load(); n < cs.retryMax {
-		cs.num.Add(1)
-		return ErrAuthenticateFailed{"mock-error"}
-	}
-
-	return nil
-}
+func (cs *mockControlStream) Authenticate(*auth.Credential) error       { return cs.authError }
 func (cs *mockControlStream) CloseWithError(string) error               { return nil }
 func (cs *mockControlStream) RequestStream(*frame.HandshakeFrame) error { return nil }
-
-var _ ClientControlStream = &mockControlStream{}

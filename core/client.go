@@ -35,6 +35,7 @@ type Client struct {
 	controlStreamOpener ClientControlStreamOpener
 
 	writeFrameChan chan frame.Frame
+	reconnecChan   chan struct{}
 }
 
 // NewClient creates a new YoMo-Client.
@@ -68,6 +69,7 @@ func NewClient(appName string, streamType StreamType, opts ...ClientOption) *Cli
 		errorfn:             func(err error) { logger.Error("client err", err) },
 		controlStreamOpener: clientControlStreamOpener,
 		writeFrameChan:      make(chan frame.Frame),
+		reconnecChan:        make(chan struct{}),
 		ctx:                 ctx,
 		ctxCancel:           ctxCancel,
 	}
@@ -100,9 +102,7 @@ connect:
 }
 
 func (c *Client) runBackground(ctx context.Context, addr string, controlStream ClientControlStream, dataStream DataStream) {
-	reconnection := make(chan struct{})
-
-	go c.processStream(controlStream, dataStream, reconnection)
+	go c.processStream(controlStream, dataStream)
 
 	for {
 		select {
@@ -112,7 +112,7 @@ func (c *Client) runBackground(ctx context.Context, addr string, controlStream C
 		case <-ctx.Done():
 			c.cleanStream(controlStream, ctx.Err())
 			return
-		case <-reconnection:
+		case <-c.reconnecChan:
 		reconnect:
 			var err error
 			controlStream, dataStream, err = c.openStream(ctx, addr)
@@ -125,7 +125,7 @@ func (c *Client) runBackground(ctx context.Context, addr string, controlStream C
 				time.Sleep(time.Second)
 				goto reconnect
 			}
-			go c.processStream(controlStream, dataStream, reconnection)
+			go c.processStream(controlStream, dataStream)
 		}
 	}
 }
@@ -221,7 +221,7 @@ func (c *Client) openDataStream(ctx context.Context, controlStream ClientControl
 	return controlStream.AcceptStream(ctx)
 }
 
-func (c *Client) processStream(controlStream ClientControlStream, dataStream DataStream, reconnection chan<- struct{}) {
+func (c *Client) processStream(controlStream ClientControlStream, dataStream DataStream) {
 	defer dataStream.Close()
 
 	readFrameChan := c.readFrame(dataStream)
@@ -230,7 +230,7 @@ func (c *Client) processStream(controlStream ClientControlStream, dataStream Dat
 		select {
 		case result := <-readFrameChan:
 			if err := result.err; err != nil {
-				c.handleFrameError(err, reconnection)
+				c.handleFrameError(err)
 				return
 			}
 			func() {
@@ -248,8 +248,7 @@ func (c *Client) processStream(controlStream ClientControlStream, dataStream Dat
 				c.handleFrame(result.frame)
 			}()
 		case f := <-c.writeFrameChan:
-			err := dataStream.WriteFrame(f)
-			c.handleFrameError(err, reconnection)
+			c.handleFrameError(dataStream.WriteFrame(f))
 		}
 	}
 }
@@ -258,7 +257,7 @@ func (c *Client) processStream(controlStream ClientControlStream, dataStream Dat
 // Sending the error to the error function (errorfn).
 // Closing the client if the data stream has been closed.
 // Always attempting to reconnect if an error is encountered.
-func (c *Client) handleFrameError(err error, reconnection chan<- struct{}) {
+func (c *Client) handleFrameError(err error) {
 	if err == nil {
 		return
 	}
@@ -274,7 +273,7 @@ func (c *Client) handleFrameError(err error, reconnection chan<- struct{}) {
 	// always attempting to reconnect if an error is encountered,
 	// the error is mostly network error.
 	select {
-	case reconnection <- struct{}{}:
+	case c.reconnecChan <- struct{}{}:
 	default:
 	}
 }
